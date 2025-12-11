@@ -1,211 +1,134 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ru">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Карта: панорамирование + pinch zoom</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Карта</title>
 <style>
-  html, body { margin:0; padding:0; height:100%; overflow:hidden; }
-  body { background:#111; touch-action:none; user-select:none; }
+    body, html {
+        margin: 0;
+        padding: 0;
+        overflow: hidden;
+        touch-action: none; /* Полный контроль касаний */
+        background: #000;
+    }
 
-  #wrapper {
-    position:relative;
-    width:100%;
-    height:100%;
-    overflow:hidden;
-    background:#000;
-  }
+    #container {
+        width: 100vw;
+        height: 100vh;
+        overflow: hidden;
+        position: relative;
+        background: #111;
+    }
 
-  #map {
-    position:absolute;
-    left:0;
-    top:0;
-    will-change:transform;
-    transform-origin:0 0;
-  }
-
-  #map img {
-    max-width:none;
-    pointer-events:none;
-    user-drag:none;
-    -webkit-user-drag:none;
-  }
+    #map {
+        position: absolute;
+        left: 0;
+        top: 0;
+        transform-origin: 0 0;
+        user-select: none;
+        touch-action: none;
+        will-change: transform;
+    }
 </style>
 </head>
 <body>
 
-<div id="wrapper">
-  <div id="map">
-    <img id="mapImg" src="big-map.jpg" alt="">
-  </div>
+<div id="container">
+    <img id="map" src="map-big.jpg" alt="Map">
 </div>
 
 <script>
-(function() {
-  const wrapper = document.getElementById("wrapper");
-  const mapEl = document.getElementById("map");
-  const img = document.getElementById("mapImg");
+const container = document.getElementById("container");
+const map = document.getElementById("map");
 
-  let pos = { x:0, y:0 };
-  let lastPos = { x:0, y:0 };
-  let pointerStart = { x:0, y:0 };
+let posX = 0, posY = 0;
+let lastX = 0, lastY = 0;
 
-  let scale = 1;
-  let minScale = 1;
-  let maxScale = 4;
+let scale = 1;
+let lastScale = 1;
 
-  let velocity = { x:0, y:0 };
-  const FRICTION = 0.9;
+let startDistance = 0;
+let startMid = { x: 0, y: 0 };
 
-  let isDragging = false;
+let isDragging = false;
 
-  let touches = [];
+// ---- Ограничение перемещений ----
+function clampPosition() {
+    const rect = container.getBoundingClientRect();
+    const mapWidth = map.naturalWidth * scale;
+    const mapHeight = map.naturalHeight * scale;
 
-  // -----------------------------
-  // APPLY TRANSFORM
-  // -----------------------------
-  function applyTransform() {
-    mapEl.style.transform =
-      `translate(${pos.x}px, ${pos.y}px) scale(${scale})`;
-  }
+    const minX = Math.min(0, rect.width - mapWidth);
+    const minY = Math.min(0, rect.height - mapHeight);
 
-  // -----------------------------
-  // LIMIT POSITION
-  // -----------------------------
-  function limitPosition() {
-    const w = wrapper.clientWidth;
-    const h = wrapper.clientHeight;
+    posX = Math.min(0, Math.max(minX, posX));
+    posY = Math.min(0, Math.max(minY, posY));
+}
 
-    const mapW = img.naturalWidth * scale;
-    const mapH = img.naturalHeight * scale;
+// ---- Применение трансформации ----
+function updateTransform() {
+    clampPosition();
+    map.style.transform = `translate(${posX}px, ${posY}px) scale(${scale})`;
+}
 
-    if (mapW <= w) pos.x = (w - mapW) / 2;
-    else pos.x = Math.min(0, Math.max(pos.x, w - mapW));
+// ---- Расстояние между пальцами ----
+function distance(p1, p2) {
+    return Math.hypot(p2.clientX - p1.clientX, p2.clientY - p1.clientY);
+}
 
-    if (mapH <= h) pos.y = (h - mapH) / 2;
-    else pos.y = Math.min(0, Math.max(pos.y, h - mapH));
-  }
+// ---- Центральная точка между пальцами ----
+function midpoint(p1, p2) {
+    return {
+        x: (p1.clientX + p2.clientX) / 2,
+        y: (p1.clientY + p2.clientY) / 2
+    };
+}
 
-  // -----------------------------
-  // START
-  // -----------------------------
-  wrapper.addEventListener("touchstart", (e) => {
-    touches = Array.from(e.touches);
-
-    if (touches.length === 1) {
-      // ОДИН ПАЛЕЦ — ДВИЖЕНИЕ
-      isDragging = true;
-      pointerStart.x = touches[0].clientX;
-      pointerStart.y = touches[0].clientY;
-
-      lastPos.x = pos.x;
-      lastPos.y = pos.y;
-
-      velocity.x = 0;
-      velocity.y = 0;
+container.addEventListener("touchstart", (e) => {
+    if (e.touches.length === 1) {
+        // Перемещение
+        isDragging = true;
+        lastX = e.touches[0].clientX - posX;
+        lastY = e.touches[0].clientY - posY;
     }
-  }, { passive: false });
 
-  // -----------------------------
-  // MOVE
-  // -----------------------------
-  wrapper.addEventListener("touchmove", (e) => {
+    if (e.touches.length === 2) {
+        // Зум
+        isDragging = false;
+        startDistance = distance(e.touches[0], e.touches[1]);
+        startMid = midpoint(e.touches[0], e.touches[1]);
+        lastScale = scale;
+    }
+});
+
+container.addEventListener("touchmove", (e) => {
     e.preventDefault();
-    touches = Array.from(e.touches);
 
-    // PINCH ZOOM (2 пальца)
-    if (touches.length === 2) {
-      const [t1, t2] = touches;
-
-      const dist = Math.hypot(
-        t1.clientX - t2.clientX,
-        t1.clientY - t2.clientY
-      );
-
-      if (!wrapper._lastDist) {
-        wrapper._lastDist = dist;
-        wrapper._startScale = scale;
-        return;
-      }
-
-      const delta = dist / wrapper._lastDist;
-
-      scale = Math.max(minScale, Math.min(maxScale, wrapper._startScale * delta));
-
-      limitPosition();
-      applyTransform();
-      return;
+    if (e.touches.length === 1 && isDragging) {
+        posX = e.touches[0].clientX - lastX;
+        posY = e.touches[0].clientY - lastY;
+        updateTransform();
     }
 
-    // DRAG (1 палец)
-    if (isDragging && touches.length === 1) {
-      const t = touches[0];
+    if (e.touches.length === 2) {
+        const newDist = distance(e.touches[0], e.touches[1]);
+        const zoom = newDist / startDistance;
 
-      const dx = t.clientX - pointerStart.x;
-      const dy = t.clientY - pointerStart.y;
+        scale = Math.min(4, Math.max(1, lastScale * zoom));
 
-      pos.x = lastPos.x + dx;
-      pos.y = lastPos.y + dy;
+        // Точка зума — центр между пальцами
+        const mid = midpoint(e.touches[0], e.touches[1]);
 
-      velocity.x = dx;
-      velocity.y = dy;
+        posX -= (mid.x - posX) * (scale / lastScale - 1);
+        posY -= (mid.y - posY) * (scale / lastScale - 1);
 
-      limitPosition();
-      applyTransform();
+        updateTransform();
     }
-  }, { passive: false });
+});
 
-  // -----------------------------
-  // END
-  // -----------------------------
-  wrapper.addEventListener("touchend", (e) => {
-    touches = Array.from(e.touches);
-
-    if (touches.length < 2) wrapper._lastDist = 0;
-
-    isDragging = false;
-
-    // INERTIA
-    function inertia() {
-      velocity.x *= FRICTION;
-      velocity.y *= FRICTION;
-
-      pos.x += velocity.x;
-      pos.y += velocity.y;
-
-      limitPosition();
-      applyTransform();
-
-      if (Math.abs(velocity.x) < 0.1 && Math.abs(velocity.y) < 0.1) return;
-      requestAnimationFrame(inertia);
-    }
-
-    requestAnimationFrame(inertia);
-  });
-
-  // -----------------------------
-  // INITIAL LOAD — CENTER MAP
-  // -----------------------------
-  img.onload = () => {
-    const w = wrapper.clientWidth;
-    const h = wrapper.clientHeight;
-
-    const scaleW = w / img.naturalWidth;
-    const scaleH = h / img.naturalHeight;
-
-    scale = Math.max(scaleW, scaleH);
-    minScale = scale;
-
-    const mapW = img.naturalWidth * scale;
-    const mapH = img.naturalHeight * scale;
-
-    pos.x = (w - mapW) / 2;
-    pos.y = (h - mapH) / 2;
-
-    applyTransform();
-  };
-
-})();
+container.addEventListener("touchend", () => {
+    if (event.touches.length === 0) isDragging = false;
+});
 </script>
 
 </body>
