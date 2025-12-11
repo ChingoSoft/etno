@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Карта: панорамирование + pinch zoom</title>
+<style>
+  html, body { margin:0; padding:0; height:100%; overflow:hidden; }
+  body { background:#111; touch-action:none; user-select:none; }
+
+  #wrapper {
+    position:relative;
+    width:100%;
+    height:100%;
+    overflow:hidden;
+    background:#000;
+  }
+
+  #map {
+    position:absolute;
+    left:0;
+    top:0;
+    will-change:transform;
+    transform-origin:0 0;
+  }
+
+  #map img {
+    max-width:none;
+    pointer-events:none;
+    user-drag:none;
+    -webkit-user-drag:none;
+  }
+</style>
+</head>
+<body>
+
+<div id="wrapper">
+  <div id="map">
+    <img id="mapImg" src="big-map.jpg" alt="">
+  </div>
+</div>
+
+<script>
+(function() {
+  const wrapper = document.getElementById("wrapper");
+  const mapEl = document.getElementById("map");
+  const img = document.getElementById("mapImg");
+
+  let pos = { x:0, y:0 };
+  let lastPos = { x:0, y:0 };
+  let pointerStart = { x:0, y:0 };
+
+  let scale = 1;
+  let minScale = 1;
+  let maxScale = 4;
+
+  let velocity = { x:0, y:0 };
+  const FRICTION = 0.9;
+
+  let isDragging = false;
+
+  let touches = [];
+
+  // -----------------------------
+  // APPLY TRANSFORM
+  // -----------------------------
+  function applyTransform() {
+    mapEl.style.transform =
+      `translate(${pos.x}px, ${pos.y}px) scale(${scale})`;
+  }
+
+  // -----------------------------
+  // LIMIT POSITION
+  // -----------------------------
+  function limitPosition() {
+    const w = wrapper.clientWidth;
+    const h = wrapper.clientHeight;
+
+    const mapW = img.naturalWidth * scale;
+    const mapH = img.naturalHeight * scale;
+
+    if (mapW <= w) pos.x = (w - mapW) / 2;
+    else pos.x = Math.min(0, Math.max(pos.x, w - mapW));
+
+    if (mapH <= h) pos.y = (h - mapH) / 2;
+    else pos.y = Math.min(0, Math.max(pos.y, h - mapH));
+  }
+
+  // -----------------------------
+  // START
+  // -----------------------------
+  wrapper.addEventListener("touchstart", (e) => {
+    touches = Array.from(e.touches);
+
+    if (touches.length === 1) {
+      // ОДИН ПАЛЕЦ — ДВИЖЕНИЕ
+      isDragging = true;
+      pointerStart.x = touches[0].clientX;
+      pointerStart.y = touches[0].clientY;
+
+      lastPos.x = pos.x;
+      lastPos.y = pos.y;
+
+      velocity.x = 0;
+      velocity.y = 0;
+    }
+  }, { passive: false });
+
+  // -----------------------------
+  // MOVE
+  // -----------------------------
+  wrapper.addEventListener("touchmove", (e) => {
+    e.preventDefault();
+    touches = Array.from(e.touches);
+
+    // PINCH ZOOM (2 пальца)
+    if (touches.length === 2) {
+      const [t1, t2] = touches;
+
+      const dist = Math.hypot(
+        t1.clientX - t2.clientX,
+        t1.clientY - t2.clientY
+      );
+
+      if (!wrapper._lastDist) {
+        wrapper._lastDist = dist;
+        wrapper._startScale = scale;
+        return;
+      }
+
+      const delta = dist / wrapper._lastDist;
+
+      scale = Math.max(minScale, Math.min(maxScale, wrapper._startScale * delta));
+
+      limitPosition();
+      applyTransform();
+      return;
+    }
+
+    // DRAG (1 палец)
+    if (isDragging && touches.length === 1) {
+      const t = touches[0];
+
+      const dx = t.clientX - pointerStart.x;
+      const dy = t.clientY - pointerStart.y;
+
+      pos.x = lastPos.x + dx;
+      pos.y = lastPos.y + dy;
+
+      velocity.x = dx;
+      velocity.y = dy;
+
+      limitPosition();
+      applyTransform();
+    }
+  }, { passive: false });
+
+  // -----------------------------
+  // END
+  // -----------------------------
+  wrapper.addEventListener("touchend", (e) => {
+    touches = Array.from(e.touches);
+
+    if (touches.length < 2) wrapper._lastDist = 0;
+
+    isDragging = false;
+
+    // INERTIA
+    function inertia() {
+      velocity.x *= FRICTION;
+      velocity.y *= FRICTION;
+
+      pos.x += velocity.x;
+      pos.y += velocity.y;
+
+      limitPosition();
+      applyTransform();
+
+      if (Math.abs(velocity.x) < 0.1 && Math.abs(velocity.y) < 0.1) return;
+      requestAnimationFrame(inertia);
+    }
+
+    requestAnimationFrame(inertia);
+  });
+
+  // -----------------------------
+  // INITIAL LOAD — CENTER MAP
+  // -----------------------------
+  img.onload = () => {
+    const w = wrapper.clientWidth;
+    const h = wrapper.clientHeight;
+
+    const scaleW = w / img.naturalWidth;
+    const scaleH = h / img.naturalHeight;
+
+    scale = Math.max(scaleW, scaleH);
+    minScale = scale;
+
+    const mapW = img.naturalWidth * scale;
+    const mapH = img.naturalHeight * scale;
+
+    pos.x = (w - mapW) / 2;
+    pos.y = (h - mapH) / 2;
+
+    applyTransform();
+  };
+
+})();
+</script>
+
+</body>
+</html>
