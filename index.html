@@ -8,7 +8,7 @@
         margin: 0;
         padding: 0;
         overflow: hidden;
-        touch-action: none; /* Полный контроль касаний */
+        touch-action: none;
         background: #000;
     }
 
@@ -17,17 +17,14 @@
         height: 100vh;
         overflow: hidden;
         position: relative;
-        background: #111;
     }
 
     #map {
         position: absolute;
-        left: 0;
-        top: 0;
         transform-origin: 0 0;
+        will-change: transform;
         user-select: none;
         touch-action: none;
-        will-change: transform;
     }
 </style>
 </head>
@@ -42,94 +39,87 @@ const container = document.getElementById("container");
 const map = document.getElementById("map");
 
 let posX = 0, posY = 0;
-let lastX = 0, lastY = 0;
+let startX = 0, startY = 0;
 
 let scale = 1;
-let lastScale = 1;
+let startScale = 1;
 
-let startDistance = 0;
-let startMid = { x: 0, y: 0 };
+let pinchDistance = 0;
 
-let isDragging = false;
+// Ограничиваем карту чтобы не выходила за края
+function clamp() {
+    const cw = container.clientWidth;
+    const ch = container.clientHeight;
 
-// ---- Ограничение перемещений ----
-function clampPosition() {
-    const rect = container.getBoundingClientRect();
-    const mapWidth = map.naturalWidth * scale;
-    const mapHeight = map.naturalHeight * scale;
+    const mw = map.naturalWidth * scale;
+    const mh = map.naturalHeight * scale;
 
-    const minX = Math.min(0, rect.width - mapWidth);
-    const minY = Math.min(0, rect.height - mapHeight);
+    const minX = Math.min(0, cw - mw);
+    const minY = Math.min(0, ch - mh);
 
-    posX = Math.min(0, Math.max(minX, posX));
-    posY = Math.min(0, Math.max(minY, posY));
+    posX = Math.max(minX, Math.min(0, posX));
+    posY = Math.max(minY, Math.min(0, posY));
 }
 
-// ---- Применение трансформации ----
-function updateTransform() {
-    clampPosition();
+function render() {
+    clamp();
     map.style.transform = `translate(${posX}px, ${posY}px) scale(${scale})`;
 }
 
-// ---- Расстояние между пальцами ----
-function distance(p1, p2) {
-    return Math.hypot(p2.clientX - p1.clientX, p2.clientY - p1.clientY);
+function getDistance(t1, t2) {
+    return Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY);
 }
 
-// ---- Центральная точка между пальцами ----
-function midpoint(p1, p2) {
+function getMidpoint(t1, t2) {
     return {
-        x: (p1.clientX + p2.clientX) / 2,
-        y: (p1.clientY + p2.clientY) / 2
+        x: (t1.clientX + t2.clientX) / 2,
+        y: (t1.clientY + t2.clientY) / 2
     };
 }
 
+// --------------------- TOUCH START ---------------------
 container.addEventListener("touchstart", (e) => {
     if (e.touches.length === 1) {
-        // Перемещение
-        isDragging = true;
-        lastX = e.touches[0].clientX - posX;
-        lastY = e.touches[0].clientY - posY;
+        // плавное перетаскивание
+        startX = e.touches[0].clientX - posX;
+        startY = e.touches[0].clientY - posY;
     }
 
     if (e.touches.length === 2) {
-        // Зум
-        isDragging = false;
-        startDistance = distance(e.touches[0], e.touches[1]);
-        startMid = midpoint(e.touches[0], e.touches[1]);
-        lastScale = scale;
+        // зум
+        pinchDistance = getDistance(e.touches[0], e.touches[1]);
+        startScale = scale;
     }
 });
 
+// --------------------- TOUCH MOVE ---------------------
 container.addEventListener("touchmove", (e) => {
     e.preventDefault();
 
-    if (e.touches.length === 1 && isDragging) {
-        posX = e.touches[0].clientX - lastX;
-        posY = e.touches[0].clientY - lastY;
-        updateTransform();
+    if (e.touches.length === 1) {
+        // плавное перемещение
+        const touch = e.touches[0];
+        posX = touch.clientX - startX;
+        posY = touch.clientY - startY;
+
+        render();
     }
 
     if (e.touches.length === 2) {
-        const newDist = distance(e.touches[0], e.touches[1]);
-        const zoom = newDist / startDistance;
+        // зум
+        const newDist = getDistance(e.touches[0], e.touches[1]);
+        const zoomFactor = newDist / pinchDistance;
 
-        scale = Math.min(4, Math.max(1, lastScale * zoom));
+        scale = Math.min(4, Math.max(1, startScale * zoomFactor));
 
-        // Точка зума — центр между пальцами
-        const mid = midpoint(e.touches[0], e.touches[1]);
-
-        posX -= (mid.x - posX) * (scale / lastScale - 1);
-        posY -= (mid.y - posY) * (scale / lastScale - 1);
-
-        updateTransform();
+        render();
     }
 });
 
+// --------------------- TOUCH END ---------------------
 container.addEventListener("touchend", () => {
-    if (event.touches.length === 0) isDragging = false;
+    // никаких рывков, никаких инерций — карта остаётся там, где остановили палец
 });
 </script>
-
 </body>
 </html>
