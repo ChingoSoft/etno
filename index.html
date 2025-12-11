@@ -115,15 +115,28 @@
     if (e.touches.length === 2) {
       const [t1, t2] = e.touches;
 
+      // центр pinch-жеста
+      const centerX = (t1.clientX + t2.clientX) / 2;
+      const centerY = (t1.clientY + t2.clientY) / 2;
+
+      // точка карты под пальцами (до масштабирования)
+      const mapPointX = (centerX - pos.x) / scale;
+      const mapPointY = (centerY - pos.y) / scale;
+
+      // новая величина масштаба
       const dist = Math.hypot(
         t1.clientX - t2.clientX,
         t1.clientY - t2.clientY
       );
 
-      let delta = dist / pinchStartDist;
+      let newScale = pinchStartScale * (dist / pinchStartDist);
+      newScale = Math.min(maxScale, Math.max(minScale, newScale));
 
-      scale = Math.min(maxScale, Math.max(minScale, pinchStartScale * delta));
+      // корректируем позицию, чтобы точка под пальцами не «убежала»
+      pos.x = centerX - mapPointX * newScale;
+      pos.y = centerY - mapPointY * newScale;
 
+      scale = newScale;
       clamp();
       apply();
       return;
